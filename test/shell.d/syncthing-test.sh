@@ -16,6 +16,7 @@ assertEqual(syncthing.prettyPath('/home/amy/Sync/Photos', '/home/amy'), '~/Sync/
 assertEqual(syncthing.relativeTime('2026-08-23T09:00:00Z', Date.parse('2026-08-23T11:02:00Z')), '2h ago', 'syncthing formats last-seen time')
 
 const snapshot = syncthing.parseSnapshot(JSON.stringify({
+  ok: true,
   installed: true,
   running: true,
   authenticated: true,
@@ -57,11 +58,33 @@ assertDeepEqual(
   'syncthing gives incoming offers stable notification keys'
 )
 assert(!syncthing.parseSnapshot('{').ok, 'syncthing rejects invalid helper JSON')
+for (const raw of ['', 'null', '[]', '{}', '{"ok":true}', '{"ok":false,"message":"API failed"}']) {
+  assert(!syncthing.parseSnapshot(raw).ok, 'syncthing rejects incomplete status: ' + raw)
+}
+assertEqual(syncthing.parseSnapshot('{"ok":false,"message":"API failed"}').lastError, 'API failed', 'helper errors are preserved')
+assertEqual(syncthing.statusText({statusState: 'loading', installed: false}), 'Checking…', 'initial state is not missing')
+assertEqual(syncthing.statusText({statusState: 'error', installed: false}), 'Status unavailable', 'failed status is not missing')
+const absent = syncthing.parseSnapshot(JSON.stringify({ok: true, installed: false, running: false, authenticated: false}))
+assert(absent.ok, 'confirmed absence is a valid snapshot')
+assertEqual(syncthing.statusText(absent), 'Not installed', 'confirmed absence is shown')
+for (const id of ['omarchy.syncthing', 'ziggy.syncthing']) {
+  // The scoped API deliberately has neither registryRevision nor inBar.
+  const registry = {enabled: true, isEnabled(requested) { return this.enabled && requested === id }}
+  const bar = {layout: {left: [], center: [], right: [{id}]}}
+  assert(syncthing.widgetEnabled(registry, id, bar), 'enabled widget polls: ' + id)
+  bar.layout.right = []
+  assert(!syncthing.widgetEnabled(registry, id, bar), 'removed widget stops: ' + id)
+  bar.layout.left = [id]
+  assert(syncthing.widgetEnabled(registry, id, bar), 're-added widget polls: ' + id)
+  registry.enabled = false
+  assert(!syncthing.widgetEnabled(registry, id, bar), 'disabled widget stops: ' + id)
+}
+assert(!syncthing.widgetEnabled(null, 'ziggy.syncthing', null), 'uninjected widget waits')
 
 assert(/function scanAll\(\): string/.test(panelSource), 'syncthing exposes rescan-all over IPC')
 assert(/function toggleService\(\): string/.test(panelSource), 'syncthing exposes service control over IPC')
 assert(/function openWebUi\(\): string/.test(panelSource), 'syncthing exposes its Web UI handoff over IPC')
-assert(/--exec", "omarchy-shell shell summon omarchy\.syncthing"/.test(serviceSource), 'syncthing notifications open the native panel')
+assert(/--exec", "omarchy-shell shell summon " \+ pluginId/.test(serviceSource), 'syncthing notifications open the native panel')
 assert(/if \(_baselineReady\) notifyTransitions[\s\S]*if \(_desiredService !== -1/.test(serviceSource), 'syncthing recognizes an intentional stop before clearing optimistic state')
 assert(/notifyHealth \? Model\.addedKeys/.test(serviceSource), 'syncthing establishes a health baseline before sending problem notifications')
 assert(!/X-API-Key|apiKey|apikey/i.test(panelSource + serviceSource), 'syncthing never carries its API key through QML')

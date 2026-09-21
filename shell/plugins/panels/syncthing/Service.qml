@@ -10,6 +10,11 @@ Item {
   property string omarchyPath: ""
   property var pluginRegistry: null
   property var shell: null
+  property var manifest: null
+  readonly property string pluginId: manifest ? String(manifest.id) : "omarchy.syncthing"
+
+  property string statusState: "loading"
+  property string statusError: ""
 
   property int refreshIntervalSec: 60
   property bool actionableNotifications: true
@@ -53,16 +58,13 @@ Item {
   property string _pendingFoldersJson: "[]"
   property string _systemErrorsJson: "[]"
 
-  readonly property bool widgetEnabled: {
-    if (!pluginRegistry) return false
-    var revision = pluginRegistry.registryRevision
-    return revision >= 0 && pluginRegistry.inBar("omarchy.syncthing")
-  }
+  readonly property bool widgetEnabled: Model.widgetEnabled(pluginRegistry, pluginId, shell ? shell.barConfig : null)
   readonly property bool active: _desiredService === -1 ? serviceRunning : _desiredService === 1
   readonly property bool syncing: overall === "syncing" || overall === "scanning"
   readonly property bool hasAttention: overall === "error" || overall === "attention"
   readonly property bool busy: refreshing || actionProcess.running || serviceProcess.running
   readonly property string statusText: Model.statusText({
+    statusState: statusState,
     installed: installed,
     running: serviceRunning,
     authenticated: authenticated,
@@ -71,7 +73,7 @@ Item {
     overall: overall,
     syncPercent: syncPercent
   })
-  readonly property string helperPath: (omarchyPath || "") + "/shell/plugins/panels/syncthing/syncthing.py"
+  readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("syncthing.py").toString().replace(/^file:\/\//, ""))
 
   function setting(settings, name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -99,7 +101,7 @@ Item {
   }
 
   function refresh() {
-    if (!widgetEnabled || statusProcess.running || omarchyPath === "") return
+    if (!widgetEnabled || statusProcess.running) return
     refreshing = true
     statusProcess.command = ["python3", helperPath, "status"]
     statusProcess.running = true
@@ -116,10 +118,13 @@ Item {
     }
     var data = Model.parseSnapshot(raw)
     if (!data.ok) {
-      lastError = String(data.lastError || data.message || "Could not read Syncthing status")
+      statusState = "error"
+      statusError = String(data.lastError || data.message || "Could not read Syncthing status")
       return
     }
 
+    statusState = "ready"
+    statusError = ""
     installed = data.installed === true
     serviceRunning = data.running === true
     authenticated = data.authenticated === true
@@ -221,7 +226,7 @@ Item {
   function notify(text) {
     Quickshell.execDetached([
       "omarchy-notification-send",
-      "--exec", "omarchy-shell shell summon omarchy.syncthing",
+      "--exec", "omarchy-shell shell summon " + pluginId,
       "--app-name", "syncthing",
       "-g", "󰑐",
       "Syncthing", String(text || "")
@@ -295,6 +300,8 @@ Item {
 
   function reset() {
     stopEvents()
+    statusState = "loading"
+    statusError = ""
     if (statusProcess.running) statusProcess.running = false
     refreshing = false
     _baselineReady = false
@@ -357,9 +364,13 @@ Item {
     stderr: StdioCollector { id: statusStderr; waitForEnd: true }
     onExited: function(exitCode) {
       root.refreshing = false
+      if (!root.widgetEnabled) return
       var output = String(statusStdout.text || "")
       if (exitCode === 0 && output.trim() !== "") root.applySnapshot(output)
-      else root.lastError = String(statusStderr.text || "Could not read Syncthing status").trim()
+      else {
+        root.statusState = "error"
+        root.statusError = String(statusStderr.text || "Could not read Syncthing status").trim()
+      }
     }
   }
 

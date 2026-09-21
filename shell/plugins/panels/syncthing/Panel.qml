@@ -58,6 +58,7 @@ Panel {
   readonly property bool headerHasCursor: cursorActive && focusSection === "header" && syncthing && syncthing.installed
   readonly property string heroMeta: {
     if (!syncthing) return "Loading integration"
+    if (syncthing.statusState !== "ready") return syncthing.statusText
     if (!syncthing.installed) return "Not installed"
     if (!active) return syncthing.serviceState === "failed" ? "Service failed" : "Syncing stopped"
     if (!authenticated) return syncthing.message || "Local API unavailable"
@@ -348,7 +349,7 @@ Panel {
           }
 
           CursorSurface {
-            visible: syncthing && (!syncthing.installed || (root.active && !root.authenticated))
+            visible: !syncthing || syncthing.statusState !== "ready" || !syncthing.installed || (root.active && !root.authenticated)
             width: parent.width
             implicitHeight: unavailableText.implicitHeight + Style.spacing.rowPaddingX
             foreground: root.foreground
@@ -360,7 +361,8 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               anchors.margins: Style.space(12)
               text: {
-                if (!syncthing) return "Loading Syncthing status…"
+                if (!syncthing || syncthing.statusState === "loading") return "Loading Syncthing status…"
+                if (syncthing.statusState === "error") return syncthing.statusError
                 if (!syncthing.installed) return "Install Syncthing from Install › Service."
                 if (syncthing.reason === "nonlocal-api") return "The native panel connects only to a loopback Syncthing API. Change the Web UI listen address to 127.0.0.1:8384 to use it."
                 return syncthing.message || "The local Syncthing API is not ready yet."

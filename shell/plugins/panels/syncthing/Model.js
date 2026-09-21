@@ -1,6 +1,18 @@
+function widgetEnabled(registry, id, barConfig) {
+  if (!registry || !registry.isEnabled(id)) return false
+  var layout = barConfig && barConfig.layout
+  if (!layout) return false
+  return ["left", "center", "right"].some(function(section) {
+    var entries = layout[section]
+    return Array.isArray(entries) && entries.some(function(entry) {
+      return (typeof entry === "string" ? entry : entry && entry.id) === id
+    })
+  })
+}
+
 function defaultSnapshot() {
   return {
-    ok: true,
+    ok: false,
     installed: false,
     running: false,
     authenticated: false,
@@ -23,10 +35,14 @@ function defaultSnapshot() {
 
 function parseSnapshot(raw) {
   var text = String(raw || "").trim()
-  if (text === "") return defaultSnapshot()
   try {
     var parsed = JSON.parse(text)
-    if (!parsed || typeof parsed !== "object") return defaultSnapshot()
+    if (!parsed || parsed.ok !== true || typeof parsed.installed !== "boolean"
+        || typeof parsed.running !== "boolean" || typeof parsed.authenticated !== "boolean") {
+      var invalid = defaultSnapshot()
+      invalid.lastError = parsed && parsed.message ? String(parsed.message) : "Invalid Syncthing status response"
+      return invalid
+    }
     var result = defaultSnapshot()
     for (var key in parsed) result[key] = parsed[key]
     result.folders = Array.isArray(parsed.folders) ? parsed.folders : []
@@ -124,6 +140,8 @@ function folderStatusText(folder) {
 
 function statusText(snapshot) {
   var data = snapshot || defaultSnapshot()
+  if (data.statusState === "loading") return "Checking…"
+  if (data.statusState === "error") return "Status unavailable"
   if (!data.installed) return "Not installed"
   if (!data.running) return data.serviceState === "failed" ? "Service failed" : "Stopped"
   if (!data.authenticated) return data.reason === "nonlocal-api" ? "Non-local API unsupported" : "API unavailable"
@@ -192,6 +210,7 @@ function deviceById(devices, id) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    widgetEnabled: widgetEnabled,
     defaultSnapshot: defaultSnapshot,
     parseSnapshot: parseSnapshot,
     formatBytes: formatBytes,
